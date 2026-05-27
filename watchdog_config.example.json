@@ -1,0 +1,47 @@
+{
+  "check_interval": 180,
+  "notify": {
+    "wecom": {
+      "enabled": true,
+      "webhook_url": ""
+    },
+    "feishu": {
+      "enabled": false,
+      "webhook_url": ""
+    },
+    "dingtalk": {
+      "enabled": false,
+      "webhook_url": ""
+    },
+    "desktop": {
+      "enabled": true
+    },
+    "logfile": {
+      "enabled": true,
+      "path": "/home/user189/model_train/logs_bw_sweep/watchdog_alerts.log"
+    }
+  },
+  "monitor": {
+    "process_pattern": "python.*train_yhk",
+    "log_patterns": [
+      "/home/user189/model_train/logs_bw_sweep/*.log",
+      "/home/user189/model_train/logs/*.log"
+    ],
+    "error_keywords": [
+      "Error",
+      "Exception",
+      "Traceback",
+      "OOM",
+      "CUDA error",
+      "RuntimeError",
+      "out of memory",
+      "Segmentation fault",
+      "core dumped",
+      "killed",
+      "NaN",
+      "inf loss"
+    ],
+    "orchestrator_pattern": "train_bw_sweep\\|train_vae_hist_param_sweep\\|train_labelclip",
+    "gpu_idle_threshold": 3
+  }
+}
