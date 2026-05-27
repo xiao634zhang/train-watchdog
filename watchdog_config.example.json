@@ -1,4 +1,5 @@
 {
+  "_comment": "webhook_url 和邮箱密码请通过环境变量设置，不要写在这里。邮箱密码使用 EMAIL_PASSWORD 环境变量，163/QQ 邮箱请使用授权码而非登录密码。",
   "check_interval": 180,
   "notify": {
     "wecom": {
@@ -19,6 +20,15 @@
     "logfile": {
       "enabled": true,
       "path": "/home/user189/model_train/logs_bw_sweep/watchdog_alerts.log"
+    },
+    "email": {
+      "enabled": false,
+      "smtp_server": "smtp.163.com",
+      "smtp_port": 465,
+      "sender": "你的邮箱@163.com",
+      "password": "",
+      "receivers": ["接收告警的邮箱@xxx.com"],
+      "use_ssl": true
     }
   },
   "monitor": {
