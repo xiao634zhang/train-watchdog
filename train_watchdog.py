@@ -58,6 +58,16 @@ DEFAULT_CONFIG = {
             "enabled": False,
             "webhook_url": ""
         },
+        # 邮箱通知（163邮箱 SMTP）
+        "email": {
+            "enabled": False,
+            "smtp_server": "smtp.163.com",
+            "smtp_port": 465,
+            "sender": "",
+            "password": "",
+            "receivers": [],
+            "use_ssl": True
+        },
         # 桌面弹窗
         "desktop": {
             "enabled": True
@@ -189,6 +199,63 @@ def send_desktop(title: str, content: str):
         logger.warning(f"桌面通知失败: {e}")
 
 
+def send_email(email_cfg: dict, title: str, content: str):
+    """邮箱通知（支持 163/QQ/Outlook 等 SMTP）"""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    sender = email_cfg["sender"]
+    password = email_cfg["password"]
+    receivers = email_cfg["receivers"]
+    smtp_server = email_cfg.get("smtp_server", "smtp.163.com")
+    smtp_port = email_cfg.get("smtp_port", 465)
+    use_ssl = email_cfg.get("use_ssl", True)
+
+    if not sender or not password or not receivers:
+        logger.warning("邮箱配置不完整，跳过邮件发送")
+        return
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"🚨 训练告警：{title}"
+        msg["From"] = sender
+        msg["To"] = ", ".join(receivers)
+
+        # 纯文本版本
+        text_body = f"训练告警：{title}\n\n{content}\n\n时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+        # HTML 版本（更美观）
+        html_body = f"""
+        <div style="font-family: 'Microsoft YaHei', Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: #e74c3c; color: white; padding: 12px 20px; border-radius: 8px 8px 0 0;">
+                <h2 style="margin: 0;">🚨 训练告警：{title}</h2>
+            </div>
+            <div style="background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 8px 8px;">
+                <pre style="white-space: pre-wrap; font-size: 14px; line-height: 1.6;">{content}</pre>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 16px 0;">
+                <p style="color: #999; font-size: 12px;">发送时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            </div>
+        </div>
+        """
+
+        msg.attach(MIMEText(text_body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        if use_ssl:
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=15)
+        else:
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=15)
+            server.starttls()
+
+        server.login(sender, password)
+        server.sendmail(sender, receivers, msg.as_string())
+        server.quit()
+        logger.info(f"邮件通知已发送: {title} -> {', '.join(receivers)}")
+    except Exception as e:
+        logger.warning(f"邮件通知失败: {e}")
+
+
 def send_logfile(log_path: str, title: str, content: str):
     """写入告警日志文件"""
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -222,6 +289,10 @@ def send_alert(config: dict, title: str, content: str, level: str = "error"):
     # 钉钉
     if notify_cfg["dingtalk"]["enabled"] and notify_cfg["dingtalk"]["webhook_url"]:
         send_dingtalk(notify_cfg["dingtalk"]["webhook_url"], title, content)
+
+    # 邮箱
+    if notify_cfg.get("email", {}).get("enabled"):
+        send_email(notify_cfg["email"], title, content)
 
 
 # ─── 监控检查函数 ─────────────────────────────────────────────────────────
@@ -475,6 +546,15 @@ class TrainWatchdog:
         logger.info(f"🐕 训练看门狗已启动，检查间隔: {interval}s")
         logger.info(f"通知渠道: {', '.join(k for k, v in self.config['notify'].items() if v.get('enabled'))}")
 
+        # 初始化日志文件位置：跳到文件末尾，只监控新增内容
+        for pattern in self.monitor_cfg["log_patterns"]:
+            for log_file in glob.glob(pattern):
+                try:
+                    self.last_log_positions[log_file] = os.path.getsize(log_file)
+                except Exception:
+                    pass
+        logger.info(f"已跳过 {len(self.last_log_positions)} 个现有日志文件的历史内容")
+
         # 初始状态
         processes = get_train_processes(self.monitor_cfg["process_pattern"])
         self.prev_process_count = len(processes)
@@ -528,6 +608,11 @@ def load_config(config_path: str) -> dict:
             config["notify"][channel]["webhook_url"] = url
             if not config["notify"][channel]["enabled"]:
                 config["notify"][channel]["enabled"] = True
+
+    # 环境变量覆盖邮箱密码（授权码）
+    email_password = os.environ.get("EMAIL_PASSWORD", "")
+    if email_password:
+        config["notify"]["email"]["password"] = email_password
 
     return config
 
