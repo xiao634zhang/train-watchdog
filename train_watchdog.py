@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
             "enabled": False,
             "webhook_url": ""
         },
-        # 邮箱通知（163邮箱 SMTP）
+        # 邮箱通知（163邮箱 SMTP）   
         "email": {
             "enabled": False,
             "smtp_server": "smtp.163.com",
@@ -364,11 +364,16 @@ def get_gpu_processes() -> dict:
         return {}
 
 
-def check_log_errors(log_patterns: list, error_keywords: list, last_positions: dict) -> list:
+def check_log_errors(log_patterns: list, error_keywords: list, last_positions: dict, exclude_files: set = None) -> list:
     """检查日志文件中是否出现新的错误"""
+    if exclude_files is None:
+        exclude_files = set()
     alerts = []
     for pattern in log_patterns:
         for log_file in glob.glob(pattern):
+            # ★ 跳过排除的文件（如 watchdog_alerts.log 自身，防止自引用循环）
+            if os.path.basename(log_file) in exclude_files or 'watchdog' in os.path.basename(log_file):
+                continue
             file_size = os.path.getsize(log_file)
             last_pos = last_positions.get(log_file, 0)
 
@@ -418,8 +423,10 @@ def check_orchestrator(pattern: str) -> bool:
 # ─── 主监控循环 ───────────────────────────────────────────────────────────
 
 class TrainWatchdog:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, config_path: str = None):
         self.config = config
+        self.config_path = config_path  # 保存配置文件路径，用于热重载
+        self.config_mtime = self._get_config_mtime()  # 记录配置文件修改时间
         self.monitor_cfg = config["monitor"]
 
         # 状态追踪
@@ -431,6 +438,28 @@ class TrainWatchdog:
         self.orchestrator_was_running = False
         self.alerted_pids = set()  # 已经告警过的退出 PID
         self.all_done_notified = False
+
+    def _get_config_mtime(self) -> float:
+        """获取配置文件的修改时间"""
+        if self.config_path and os.path.exists(self.config_path):
+            return os.path.getmtime(self.config_path)
+        return 0
+
+    def _hot_reload_config(self):
+        """热重载：检测配置文件变更并重新加载"""
+        if not self.config_path:
+            return
+        try:
+            current_mtime = self._get_config_mtime()
+            if current_mtime > self.config_mtime:
+                new_config = load_config(self.config_path)
+                self.config = new_config
+                self.monitor_cfg = new_config["monitor"]
+                self.config_mtime = current_mtime
+                channels = ', '.join(k for k, v in self.config['notify'].items() if v.get('enabled'))
+                logger.info(f"🔄 配置文件已热重载！通知渠道: {channels}")
+        except Exception as e:
+            logger.warning(f"配置热重载失败: {e}")
 
     def check_once(self):
         """执行一轮检查"""
@@ -568,6 +597,7 @@ class TrainWatchdog:
         while True:
             try:
                 time.sleep(interval)
+                self._hot_reload_config()  # ★ 每次检查前尝试热重载配置
                 self.check_once()
             except KeyboardInterrupt:
                 logger.info("看门狗收到 Ctrl+C，退出")
@@ -645,7 +675,7 @@ def main():
         logger.info("测试完成")
         return
 
-    watchdog = TrainWatchdog(config)
+    watchdog = TrainWatchdog(config, config_path=args.config)
     watchdog.run()
 
 

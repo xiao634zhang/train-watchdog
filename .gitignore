@@ -4,3 +4,6 @@ watchdog_config.json
 # 运行时日志
 watchdog.log
 *.log
+
+# Python 缓存
+__pycache__/
